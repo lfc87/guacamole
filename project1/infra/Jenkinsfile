@@ -46,7 +46,7 @@ pipeline {
                 }
                 script {
                     sh 'tree'
-                    sh ("timeout 30 java -cp ./hellofrodo/project1/build/libs/frodo-1.0-SNAPSHOT.jar HelloFrodo")
+                    sh 'timeout 30 java -cp ./project1/build/libs/frodo-1.0-SNAPSHOT.jar HelloFrodo'
                 }
             }
             post {
