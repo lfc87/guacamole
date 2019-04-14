@@ -40,13 +40,6 @@ pipeline {
             }
         }
         stage('DEPLOY_BUILD') {
-            when {
-                // temporarly!! ui-/component-tests branchname handling must be fixed.. so test are only
-                // executed in the develop branch
-                anyOf {
-                   branch 'develop'
-                }
-            }
             steps {
                 ansiColor('xterm') {
                     echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with DEPLOY BUILD Stage		\033[0m"
