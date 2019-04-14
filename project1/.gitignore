@@ -1,0 +1,8 @@
+nodejs/
+node_modules/
+build/
+out/
+src/main/resources/static/**/*
+*.log*
+**/*.iml
+**/*.class
