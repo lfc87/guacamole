@@ -1,0 +1,655 @@
+@Library('TF_CD_LIB@master') _
+pipeline {
+    options {
+        //enable timestamps in console output
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '5', artifactNumToKeepStr: '5'))
+    }
+    // This configures the agent, where the pipeline will be executed. The default should be `none` so
+    // that `Approval` stage does not block an executor on the master node.
+    // agent none
+    agent {
+        node {
+            //if not specified otherwise, everything runs on the Jenkins master
+            label 'master'
+        }
+    }
+    stages {
+        stage('BUILD_APP') {
+            tools {
+                jdk "openjdk11.0.2"
+            }
+            steps {
+                ansiColor('xterm') {
+                    echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with Build_App Stage		\033[0m"
+                }
+                script {
+                    config = load 'infra/config.jenkins'
+                    shell("echo 'Building application'")
+                    buildName = "1.1_${env.BUILD_NUMBER}"
+                    setBuildName(buildName)
+
+                    sh 'cd app && ./gradlew -version'
+                    sh 'cd app && ./gradlew clean'
+                    sh 'cd app && ./gradlew build -x test --refresh-dependencies'
+                    sh 'cp ./app/build/libs/stammdatenundservicesui-*.jar ./infra/openshift/application/container/susui.jar'
+                    sh 'cd infra/openshift/application/container/ && tar -cf susui.tar *'
+                }
+            }
+            post {
+                failure {
+                    script { env.FAILURE_STAGE = 'BUILD_APP' }
+                }
+            }
+        }
+        stage('UNIT_TESTS') {
+            tools {
+                jdk "openjdk11.0.2"
+            }
+            steps {
+                ansiColor('xterm') {
+                    echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with UNIT_TESTS Stage		\033[0m"
+                }
+                script {
+                    shell("echo 'Starting Unit Tests'")
+                        sh 'cd app && ./gradlew -version'
+                        sh 'cd app && ./gradlew test'
+
+                        // Publish the unittest-results to Test Results Analyzer
+                        junit allowEmptyResults: true, testResults: 'app/build/test-results/test/*.xml'
+
+                        // HTML Publisher plugin - Publish unit test results to sidebar.
+                        publishHTML(target: [
+                               allowMissing         : false,
+                               alwaysLinkToLastBuild: true,
+                               keepAll              : true,
+                               reportDir            : 'app/build/reports/tests/test/',
+                               reportFiles          : 'index.html',
+                               reportName           : "Unit Test Results"
+                        ])
+
+                        // HTML Publisher plugin - Publish jacoco test results to sidebar.
+                        publishHTML(target: [
+                               allowMissing         : false,
+                               alwaysLinkToLastBuild: true,
+                               keepAll              : true,
+                               reportDir            : 'app/build/reports/coverage/',
+                               reportFiles          : 'index.html',
+                               reportName           : "Jacoco Test Results"
+                        ])
+                }
+            }
+            post {
+                failure {
+                    script { env.FAILURE_STAGE = 'UNIT_TESTS' }
+                }
+            }
+        }
+        stage('SONARQUBE') {
+            tools {
+                jdk "openjdk11.0.2"
+            }
+            steps {
+                ansiColor('xterm') {
+                    echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with SonarQube Stage		\033[0m"
+                }
+                script {
+                    shell("echo 'Checking sonarqube'")
+                    // deactivate because sonarqube now checks the javascript file test coverage
+
+                    sh 'cd app && ./gradlew sonarqube'
+
+                }
+            }
+            post {
+                failure {
+                    script { env.FAILURE_STAGE = 'SONARQUBE' }
+                }
+            }
+        }
+        stage('OSLC') {
+            tools {
+                jdk "openjdk11.0.2"
+            }
+
+            steps {
+                ansiColor('xterm') {
+                    echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with OSLC Stage		\033[0m"
+                }
+                script {
+                    gradle = new dhl.tools.Gradle(this, config.gradle.global)
+                    openSourceLicenseCheck(gradle, config.gradle.dependencyCheck)
+                }
+            }
+            post {
+                failure {
+                    script { env.FAILURE_STAGE = 'OSLC' }
+                }
+            }
+        }
+        stage('OWASP') {
+            tools {
+                jdk "openjdk11.0.2"
+            }
+
+            steps {
+                ansiColor('xterm') {
+                    echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with OWASP Stage		\033[0m"
+                }
+                script {
+                    shell("echo 'Checking with OWASP'")
+
+                    // do owasp check
+                    sh 'cd app && ./gradlew dependencyCheckAnalyze'
+
+                     // publish results
+                     publishHTML(target: [
+                             allowMissing         : false,
+                             alwaysLinkToLastBuild: true,
+                             keepAll              : true,
+                             reportDir            : 'app/build/reports/',
+                             reportFiles          : 'dependency-check-report.html',
+                             reportName           : "OWASP Report"
+                     ])
+                }
+            }
+            post {
+                failure {
+                    script { env.FAILURE_STAGE = 'OWASP' }
+                }
+            }
+        }
+        stage('PREPARE_OPENSHIFT') {
+            steps {
+                ansiColor('xterm') {
+                    echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with PREPARE OPENSHIFT Stage		\033[0m"
+                }
+                script {
+                    def full_branch_name = env.GIT_BRANCH;
+                    def branch_name = env.GIT_BRANCH;
+                    if (branch_name!=null && branch_name.startsWith("origin/")) {
+                        branch_name = env.GIT_BRANCH.drop(7);
+                    }
+                    if (branch_name!=null && branch_name.contains("/")) {
+                        branch_name = branch_name.replace("/","-")
+                    }
+                    def revision = env.GIT_COMMIT.take(7);
+
+                    shell("echo 'Revision: $revision, Branch: $branch_name, Branch (full): $full_branch_name' ");
+
+                    sh 'git log --format="%h"  | head -1 > commit-revision.txt'
+
+                    commit_revision = readFile('commit-revision.txt').trim();
+
+                    releaseName = "${env.JOB_NAME}_1.1_${env.BUILD_NUMBER}_$revision"
+
+                    mailParams = ['#BUILD_NAME': releaseName, '#LINK': "${env.JOB_DISPLAY_URL}"]
+
+                    imageVersion = "${branch_name}_${buildName}"
+
+                    // create OpenShift CDLib instance
+                    os = new dhl.tools.OpenShift(this, config.openshift, branch_name, revision)
+
+                    properties([[$class: 'Tagger', build: false, commit: false, custom: false, customMessages: '', globalOverride: false, manual: false, review: false, workitem: false], [$class: 'BuildConfigProjectProperty', name: '', namespace: '', resourceVersion: '', uid: ''], [$class: 'EnvInjectJobProperty', info: [loadFilesFromMaster: false, propertiesContent: 'PATH+OPENSHIFT=/home/openshift_cli', secureGroovyScript: [classpath: [], sandbox: false, script: '']], keepBuildVariables: true, keepJenkinsSystemVariables: true, on: true]])
+
+                }
+            }
+            post {
+                failure {
+                    script { env.FAILURE_STAGE = 'PREPARE_OPENSHIFT' }
+                }
+            }
+        }
+        stage('BUILD_IMAGE') {
+            steps {
+                ansiColor('xterm') {
+                    echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with Build Image Stage		\033[0m"
+                }
+                script {
+                    config = load 'infra/config.jenkins'
+                    shell("echo 'Checkout Mock and Rahmenseite repository for deployment configurations'")
+                    revision = checkoutSCM(config["checkoutMock"])
+                    revision = checkoutSCM(config["checkoutRahmenseite"])
+
+                    sh 'echo "Creating Build Artifacts"'
+
+                    // create susui image for os imagestream
+                    os.build.app.create(waitReady: false, deleteBeforehand: true, additionalTemplateParameters: [ IMAGE_VERSION: imageVersion ], createGreyStacks: true)
+                    os.build.raw('start-build', "susui-app-${os.branch}", '--from-file=./infra/openshift/application/container/susui.tar')
+                    os.build.raw('start-build', "susui-logging-sidecar-${os.branch}", '--from-dir=./infra/openshift/application/logging/')
+                    os.build.app.waitForBuilds()
+                } //script
+            }
+            post {
+                failure {
+                    script { env.FAILURE_STAGE = 'BUILD_IMAGE' }
+                }
+            }
+        }
+
+        stage('DEPLOY_BUILD') {
+            when {
+                // temporarly!! ui-/component-tests branchname handling must be fixed.. so test are only
+                // executed in the develop branch
+                anyOf {
+                   branch 'develop'
+                }
+            }
+            steps {
+                lock('susui_testing_on_build_stage') {
+                    ansiColor('xterm') {
+                        echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with DEPLOY BUILD Stage		\033[0m"
+                    }
+                    script {
+                        // copy deployment configuration for java mock and rahmenseite
+                        sh ("cp ./mock/infra/openshift/application/javamock_deploymentconfig.yml ./infra/openshift/application/javamock_deploymentconfig.yml")
+                        sh ("cp ./rahmenseite/infra/openshift/application/rahmenseite_deploymentconfig.yml ./infra/openshift/application/rahmenseite_deploymentconfig.yml")
+
+                        def openshiftResourcesNamePostfix = "-${os.branch}"
+                        // starting container on build stage
+                        os.deploy_build.config.apply(waitReady: false, deleteBeforehand: true)
+                        os.deploy_build.app.apply(waitReady: true, deleteBeforehand: true, additionalTemplateParameters: [ IMAGE_VERSION: imageVersion, NAME_POSTFIX: openshiftResourcesNamePostfix ])
+                        //os.deploy_build.rahmenseite.apply(waitReady: false, deleteBeforehand: true,  additionalTemplateParameters: [ RAHMENSEITE_IMAGE_VERSION: "latest"])
+                    }
+                }
+            }
+            post {
+                failure {
+                    script { env.FAILURE_STAGE = 'DEPLOY_BUILD' }
+                }
+            }
+        }
+
+        // lock build stage during component- and ui-tests
+        stage('COMPONENT_TESTS') {
+            when {
+                // temporarly!! ui-/component-tests branchname handling must be fixed.. so test are only
+                // executed in the develop branch
+                anyOf {
+                   branch 'develop'
+                }
+            }
+            steps {
+                lock('susui_testing_on_build_stage') {
+                    ansiColor('xterm') {
+                        echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with COMPONENT_TESTS Stage		\033[0m"
+                    }
+                    script {
+                        sh ("echo 'Starting component tests'")
+
+                        def openshiftResourcesNamePostfix = "-${os.branch}"
+                        // starting container on build stage
+                        //os.deploy_build.javamock.apply(waitReady: true, deleteBeforehand: true,  additionalTemplateParameters: [ JAVAMOCK_IMAGE_VERSION: "latest"])
+
+                        // Start component tests on container in build stage
+                        // TODO add branchname from var 'os.branch' to build url for tests
+                        maven = new dhl.tools.Maven(this, config.tests.globalConfig)
+                        maven.execMaven( config.tests.componentTests, 'clean verify', true, false)
+                    }
+                }
+            }
+            post {
+                always {
+                    sh ("echo 'Publishing component test results.'")
+                    publishHTML(target: [
+                        allowMissing         : false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll              : true,
+                        reportDir            : 'test/ui-tests/target/site/serenity/',
+                        reportFiles          : 'index.html',
+                        reportName           : "UI/Komponenten-Tests Report"
+                    ])
+                }
+                failure {
+                    script { env.FAILURE_STAGE = 'COMPONENT_TESTS' }
+                }
+            }
+        }
+        stage('UI_TESTS') {
+            when {
+                // temporarly!! ui-/component-tests branchname handling must be fixed.. so test are only
+                // executed in the develop branch
+                anyOf {
+                    branch 'develop'
+                }
+            }
+            steps {
+                lock('susui_testing_on_build_stage') {
+                    ansiColor('xterm') {
+                        echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with UI_TESTS Stage		\033[0m"
+                    }
+                    script {
+                       shell("echo 'Starting ui tests'")
+                       // !!! redploy mock !!!!
+                       //os.deploy_build.javamock.apply(waitReady: true, deleteBeforehand: true)
+
+                       shell("echo 'Starting ui tests'")
+                       // Start component tests on container in build stage
+                       // TODO add branchname from var 'os.branch' to build url for tests
+                       //maven = new dhl.tools.Maven(this, config.tests.globalConfig)
+                       //maven.execMaven( config.tests.uiTests, 'clean verify', true, false)
+                    }
+                }
+            }
+            post {
+                always {
+                    sh ("echo 'Publishing component test results.'")
+                    publishHTML(target: [
+                        allowMissing         : false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll              : true,
+                        reportDir            : 'test/ui-tests/target/site/serenity/',
+                        reportFiles          : 'index.html',
+                        reportName           : "UI/Komponenten-Tests Report"
+                    ])
+                }
+                failure {
+                    script { env.FAILURE_STAGE = 'UI_TESTS' }
+                }
+            } //end post
+        }
+        stage('CLEANUP_BUILD') {
+            when {
+                // temporarly!! ui-/component-tests branchname handling must be fixed.. so test are only
+                // executed in the develop branch
+                anyOf {
+                    branch 'develop'
+                }
+            }
+            steps {
+                lock('susui_testing_on_build_stage') {
+                    ansiColor('xterm') {
+                        echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with CLEANUP_BUILD Stage		\033[0m"
+                    }
+                    script {
+                        shell("echo 'Deleting all running pods from build stage'")
+                        //os.deploy_build.rahmenseite.delete(waitReady: false)
+                        //os.deploy_build.javamock.delete(waitReady: false)
+                        //os.deploy_build.app.delete(waitReady: false)
+
+                    }
+                }
+            }
+            post {
+                failure {
+                    script { env.FAILURE_STAGE = 'CLEANUP_BUILD' }
+                }
+            }
+        }
+
+        stage('DEPLOY_TEST') {
+            steps {
+                ansiColor('xterm') {
+                    echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with Deploy_Test Stage		\033[0m"
+                }
+                shell("echo 'Deploy to test (INT)'")
+                script {
+                    def openshiftResourcesNamePostfix = '-test'
+                    os.deploy_test.config.apply(waitReady: false, deleteBeforehand: true)
+                    os.deploy_test.app.apply(waitReady: true, deleteBeforehand: true,
+                        additionalTemplateParameters: [
+                            IMAGE_VERSION: imageVersion,
+                            NAME_POSTFIX: openshiftResourcesNamePostfix
+                        ])
+                }
+            }
+            post {
+                failure {
+                    script { env.FAILURE_STAGE = 'DEPLOY_TEST' }
+                }
+            }
+        }
+
+        stage('UAT') {
+            agent none
+            when {
+                // only commits on release or hotfix branches should trigger any steps beyond this line)
+                anyOf {
+                    branch 'release/*'
+                    branch 'hotfix/*'
+                }
+            }
+
+            stages {
+                stage("PERMIT_UAT_DEPLOY") {
+                    steps {
+                        echo 'Permission for deployment to UAT'
+
+                        script {
+                            input message: 'Please giver permission to start deployment to UAT.',
+                            ok: 'Start deployment UAT',
+                            parameters: [string(name: 'Please confirm deyploment to UAT.', description: 'Description: name, first name'),]
+                        }
+                    }
+                    post {
+                        failure {
+                            script { env.FAILURE_STAGE = 'PERMIT_UAT_DEPLOY' }
+                        }
+                    }
+                }
+
+                stage('DEPLOY_UAT') {
+                    steps {
+                        ansiColor('xterm') {
+                            echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with Deploy_UAT Stage		\033[0m"
+                        }
+
+                        shell("echo 'Deploy to uat (GIT)'")
+                        script {
+                            def openshiftResourcesNamePostfix = '-uat'
+                            os.deploy_uat.config.apply(waitReady: false, deleteBeforehand: true)
+                            os.deploy_uat.app.apply(waitReady: true, deleteBeforehand: true,
+                            additionalTemplateParameters: [
+                                IMAGE_VERSION: imageVersion,
+                                NAME_POSTFIX: openshiftResourcesNamePostfix
+                            ])
+                        }
+                    }
+                    post {
+                        failure {
+                            script { env.FAILURE_STAGE = 'DEPLOY_UAT' }
+                        }
+                    }
+                }
+
+                stage('GIT_UI_TEST') {
+                    stages {
+                        stage('GIT_PREPARE') {
+                            steps {
+                                ansiColor('xterm') {
+                                    echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with GIT Stage		\033[0m"
+                                }
+
+                                shell("echo 'Starting GIT UI tests'")
+                            }
+                            post {
+                                failure {
+                                    script { env.FAILURE_STAGE = 'GIT_PREPARE' }
+                                }
+                            }
+                        } // inner stage
+
+                        stage('GIT_TESTDATA') {
+                            steps {
+                                script {
+                                        shell("echo 'Nothing to do here yet'")
+                                }
+                            }
+                            post {
+                                failure {
+                                    script { env.FAILURE_STAGE = 'GIT_TESTDATA' }
+                                }
+                            }
+                        } // inner stage
+
+                        stage('GIT_UI_TEST') {
+                            steps {
+                                script {
+                                        shell("echo 'Nothing to do here yet'")
+                                }
+                            }
+                            post {
+                                failure {
+                                    script { env.FAILURE_STAGE = 'GIT_UI_TEST' }
+                                }
+                            }
+                        } // inner stage
+                    }
+                }
+            }
+        }
+
+        stage('PROD') {
+            agent none
+            when {
+                // only commits on release or hotfix branches should trigger any steps beyond this line)
+                anyOf {
+                    // remove "disabled_" later (if prod is ready)
+                    branch 'disabled_release/*'
+                    branch 'disabled_hotfix/*'
+                }
+            }
+            stages {
+                stage("PERMIT_PROD_DEPLOY") {
+                    steps {
+                        echo 'Permission for deployment to PROD'
+
+                        script {
+                            input message: 'Please giver permission to start deployment to PROD.',
+                            ok: 'Start deployment to PROD',
+                            submitter:'abriskorn,ilaukhin',
+                            parameters: [string(name: 'Please confirm deployment to PROD.', description: 'Description: name, first name, short info for release'),]
+                        }
+                    }
+                    post {
+                        failure {
+                            script { env.FAILURE_STAGE = 'PERMIT_PROD_DEPLOY' }
+                        }
+                    }
+                }
+
+                stage('DEPLOY_PROD') {
+                    steps {
+                        ansiColor('xterm') {
+                            echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with Deploy_PROD Stage		\033[0m"
+                        }
+
+                        shell("echo 'Deploy to prod'")
+                        script {
+                            def openshiftResourcesNamePostfix = '-prod'
+                            os.deploy_prod.config.apply(waitReady: true, deleteBeforehand: true)
+                            os.deploy_prod.app.apply(waitReady: true, deleteBeforehand: true,
+                                additionalTemplateParameters: [
+                                    IMAGE_VERSION: imageVersion,
+                                    NAME_POSTFIX: openshiftResourcesNamePostfix
+                            ])
+                        }
+                    }
+                    post {
+                        failure {
+                            script { env.FAILURE_STAGE = 'DEPLOY_PROD' }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            //!delete workspace
+            node('master') {
+                dir("${env.WORKSPACE}") {
+                    sh "echo cleaning up the workspace ${env.WORKSPACE}"
+
+                    deleteDir()
+                }
+            }
+        }
+        // unten: https://jenkins.io/doc/pipeline/tour/post/#email)
+        unstable {
+            echo 'I am unstable :/'
+        }
+        failure {
+            mail to: 'dhl-neue-saeulen@materna.de',
+                    subject: "JENKINS FAILED – Pipeline : ${currentBuild.fullDisplayName}",
+                    body: "Liebe Entwickler, das Projekt StammdatenUndServicesUI konnte nicht erfolgreich gebaut werden.\nEs wurden folgende Änderungen eingefügt:\n\n ${getChangeString()}\n\ndie dazu geführt haben, dass ${env.FAILURE_STAGE} Stage fehlgeschlagen ist.\n\nBitte klicken Sie dazu auf den folgenden Link:\n${env.BUILD_URL}";
+
+        }
+        changed {
+            echo 'Things were different before...'
+        }
+    }
+}
+
+@NonCPS
+def validateWhiteList(List reportResult, List whiteListResult) {
+    reportResult.eachWithIndex { license, index ->
+        def flagw = 0
+        whiteListResult.eachWithIndex { wlicense, index2 ->
+            String aw = "${license}"
+            String bw = "${wlicense}"
+
+            aw = aw.replaceAll("(http://)(.*?)(/)", "x")
+            aw = aw.replaceAll("Eclipse", "Ecxlipse")
+            aw = aw.replaceAll(".php", ".pxhp")
+
+            if (aw.toString().toLowerCase().contains(bw.toString().toLowerCase())) {
+                flagw = 1
+            }
+        }
+
+        if (flagw == 0) {
+            String failedLicenseWl = "${license}"
+            def clearedResult = failedLicenseWl.findAll("(License)(.*?)(</)")
+            //throw new Exception("License: " + clearedResult[0] + " is not whitelisted!")
+            echo "License: " + clearedResult[0] + " is not whitelisted!"
+        }
+    }
+}
+
+@NonCPS
+def validateBlackList(List reportResult, List blackListResult) {
+    reportResult.eachWithIndex { license, index ->
+        def flagw = 0
+        blackListResult.eachWithIndex { blicense, index2 ->
+            String aw = "${license}"
+            String bw = "${blicense}"
+
+            aw = aw.replaceAll("(http://)(.*?)(/)", "x")
+            aw = aw.replaceAll("Eclipse", "Ecxlipse")
+            aw = aw.replaceAll(".php", ".pxhp")
+
+            if (aw.toString().toLowerCase().contains(bw.toString().toLowerCase())) {
+                flagw = 1
+            }
+        }
+
+        if (flagw == 1) {
+            String failedLicenseBl = "${license}"
+            def clearedResult = failedLicenseBl.findAll("(License)(.*?)(</)")
+            throw new Exception("License: " + clearedResult[0] + " is blacklisted!")
+        }
+    }
+}
+
+@NonCPS
+def getChangeString(){
+    MAX_MSG_LEN = 100
+    def changeString = ""
+
+    def changeLogSets = currentBuild.changeSets
+
+    for (int i = 0; i < changeLogSets.size(); i++) {
+        def entries = changeLogSets[i].items
+        for (int j = 0; j < entries.length; j++){
+            def entry = entries[j]
+            truncated_msg = entry.msg.take(MAX_MSG_LEN)
+            changeString += " - ${truncated_msg} [${entry.author}]\n"
+        }
+    }
+
+    if (!changeString){
+        changeString = " - No new changes"
+    }
+    return changeString
+}

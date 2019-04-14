@@ -1,0 +1,255 @@
+[
+        submitter:[
+                AESYS:'abriskorn',
+                BFR:'abriskorn'
+        ],
+        checkoutMock:[[
+		    url:"https://lcm-scms2.deutschepost.de/gerrit/zsm-service-mock.git",
+		    poll: true,
+		    dir: "mock/",
+		    credentialsId: "6989b986-1059-4f87-9b91-5f1f9c11b732",
+		    branch: "develop"
+		    ]
+		],
+		checkoutRahmenseite:[[
+        	url:"https://lcm-scms2.deutschepost.de/gerrit/rahmenseite.git",
+        	poll: true,
+        	dir: "rahmenseite/",
+        	credentialsId: "6989b986-1059-4f87-9b91-5f1f9c11b732",
+        	branch: "develop"
+       	    ]
+	    ],
+        openshift:[
+                cluster: 'prod',
+                projects: [
+                        build: [
+                                project: 'pep-privatkunden-dmz-build',
+                                credentialsId: 'svc-pep-privatkunden-dmz-test',
+                                templateDir: 'infra/openshift',
+                                stacks: [
+                                        'app': [
+                                            templates:  [
+                                                'application/susui_containerbuild',
+                                                'application/susui_logging_sidecar_containerbuild'
+                                            ],
+                                            templateParameters: [
+                                                DATA_CENTER: 'cz4',
+                                            ]
+                                        ]
+                                ],
+                                greyStacks: [
+                                        'app': [
+                                            templates:  [
+                                                'application/susui_imagestream',
+                                                'application/susui_logging_sidecar_imagestream'
+                                            ]
+                                        ],
+                                ],
+                        ],
+
+                        deploy_build: [
+                                project: 'pep-privatkunden-dmz-build',
+                                credentialsId: 'svc-pep-privatkunden-dmz-test',
+                                templateDir: 'infra/openshift',
+                                stacks: [
+                                        'app': [
+                                            templates: ['application/susui_deploymentconfig'],
+                                            templateParameters: [
+                                                DATA_CENTER: 'cz4',
+                                                OPENSHIFT_PROJECT: {"build"},
+                                            ]
+                                        ],
+                                        'config': [
+                                            templates: ['configmaps/configmap-pep-susui-configuration-build'],
+                                        ],
+                                        'messages': [
+                                            templates: ['TODO'],
+                                            ]
+                                        ],
+                                        'javamock': [
+                                            templates: ['application/javamock'],
+                                            templateParameters: [
+                                                DATA_CENTER: 'cz4',
+                                            ]
+                                        ],
+                                        'rahmenseite': [
+                                            templates: ['application/rahmenseite'],
+                                            templateParameters: [
+                                                DATA_CENTER: 'cz4',
+                                            ]
+                                        ],
+                                greyStacks: [],
+                        ],
+
+                        deploy_test: [
+                                project: 'pep-privatkunden-dmz-test',
+                                credentialsId: 'svc-pep-privatkunden-dmz-test',
+                                templateDir: 'infra/openshift',
+                                stacks: [
+                                        'app': [
+                                            templates: ['application/susui_deploymentconfig'],
+                                            templateParameters: [
+                                                DATA_CENTER: 'cz4',
+                                                OPENSHIFT_PROJECT: {"test"},
+                                            ]
+                                        ],
+                                        'config': [
+                                            templates: [
+                                                'configmaps/configmap-pep-susui-configuration-test'
+                                            ],
+                                        ],
+                                        'messages': [
+                                            templates: ['TODO'],
+                                        ],
+                                ],
+                                greyStacks: [],
+                        ],
+
+                        deploy_uat: [
+                                project: 'pep-privatkunden-dmz-uat',
+                                credentialsId: 'svc-pep-privatkunden-dmz-test',
+                                templateDir: 'infra/openshift',
+                                stacks: [
+                                        'app': [
+                                            templates: ['application/susui_deploymentconfig'],
+                                            templateParameters: [
+                                                DATA_CENTER: 'cz4',
+                                                OPENSHIFT_PROJECT: {"uat"},
+                                            ]
+                                        ],
+                                        'config': [
+                                            templates: ['configmaps/configmap-pep-susui-configuration-uat'],
+                                        ],
+                                        'messages': [
+                                            templates: ['TODO'],
+                                        ],
+                                ],
+                                greyStacks: [],
+                        ],
+
+                        deploy_prod: [
+                                project: 'pep-privatkunden-dmz-prod',
+                                credentialsId: 'svc-pep-privatkunden-dmz-test',
+                                templateDir: 'infra/openshift',
+                                stacks: [
+                                        'app': [
+                                            templates: ['application/susui_deploymentconfig_prod'],
+                                            templateParameters: [
+                                                DATA_CENTER: 'cz2',
+                                                OPENSHIFT_PROJECT: {"prod"},
+                                            ]
+                                        ],
+                                        'config': [
+                                            templates: ['configmaps/configmap-pep-susui-configuration-prod'],
+                                        ],
+                                        'messages': [
+                                            templates: ['TODO'],
+                                        ],
+                                ],
+                                greyStacks: [],
+                        ]
+                ]
+        ],
+        build:[
+                springTests: [
+                        properties: ['spring.profiles.active=production,hsqldb,ehcache']
+                ],
+                sonar: [
+                        userCredentialsId:'SONAR-USER',
+                        hostUrl:'https://lcm.deutschepost.de/sonar/',
+                ],
+                dependencyCheck: [
+                        properties: [
+                                'maveSettingsProxyId=https',
+	                        'proxySet=true',
+                                'proxyHost=proxy.tcb.deutschepost.de',
+                                'proxyPort=8080'
+                        ]
+                ]
+        ],
+        gradle:[
+                global: [
+                        properties: [
+                                'maveSettingsProxyId=https',
+                                'proxySet=true',
+                                'proxyHost=proxy.tcb.deutschepost.de',
+                                'proxyPort=8080'
+                        ]
+                ],
+                dependencyCheck: [
+                        baseline: 'HEAD',
+                        lastChangesDisabled: true,
+                        whiteListReplace: false,
+                        fullOutput: false,
+                        offline: true,
+                        properties: [
+                            'license.excludedGroups=de.deutschepost.*'
+                        ]
+                ]
+        ],
+        tests: [
+                globalConfig: [
+                        mavenTool: 'maven-3.5.4',
+                        useCoverage:false,
+                        dir: 'test/ui-tests',
+                        parameter: [
+                                '-e'
+                        ],
+                        properties: [
+                            proxySet : 'true',
+                            'https.proxyHost' : 'proxy.tcb.deutschepost.de',
+                            'https.proxyPort' : '8080'
+                        ],
+                ],
+                componentTests: [
+                        properties: [
+                            'cucumber.options' : '\"--tags @type=KT\"',
+                            susuiBaseUrl : 'https://susui-app-develop.cz4.cloudapps.dhl.com',
+                            susuiManageUrl : 'https://susui-app-develop-admin.cz4.cloudapps.dhl.com',
+                            mockBaseUrl : 'https://javamock-app-build.cz4.cloudapps.dhl.com',
+                        ],
+                ],
+                uiTests: [
+                        properties: [
+                            'cucumber.options' : '\"--tags @JENKINS\"',
+                            susuiBaseUrl : 'https://susui-app-develop.cz4.cloudapps.dhl.com',
+                            susuiManageUrl : 'https://susui-app-develop-admin.cz4.cloudapps.dhl.com',
+                            mockBaseUrl : 'https://javamock-app-build.cz4.cloudapps.dhl.com',
+                            'webdriver.remote.url' : 'http://10.192.249.68:4444/wd/hub',
+                            'webdriver.remote.driver' : 'chrome',
+                            'webdriver.remote.os' : 'WINDOWS'
+                        ],
+                ],
+        ],
+        mail:[
+                error:[
+                        to:'andre.briskorn@materna.de',
+                        replyTo:'noreply@deutschepost.de',
+                        from:'testfactory@deutschepost.de',
+                        subject:'#BUILD_NAME hat einen Fehler verusacht',
+                        body:'Sehr geehrte(r) Nutzer(in),\n\ndas Release #BUILD_NAME konnte nicht erfolgreich durchgeführt werden.\nBitte klicken Sie auf den folgenden Link:\n#LINK\n\nIhr Test Factory Team',
+                ],
+                tqs:[
+                        to:'andre.briskorn@materna.de',
+                        replyTo:'noreply@deutschepost.de',
+                        from:'testfactory@deutschepost.de',
+                        subject:'#BUILD_NAME hat einen Fehler verusacht',
+                        body:'Sehr geehrte(r) Nutzer(in),\n\ndas Veröffentlichen des TQSReports beim #BUILD_NAME war nicht erfolgreich.\nBitte klicken Sie auf den folgenden Link:\n#LINK \n\nIhr Test Factory Team',
+                ],
+                AESYS:[
+                        to:'andre.briskorn@materna.de',
+                        replyTo: 'noreply@deutschepost.de',
+                        from: 'testfactory@deutschepost.de',
+                        subject: '#BUILD_NAME needs your attention',
+                        body: 'Sehr geehrter Nutzer(in),\n\ndas Release #BUILD_NAME benötigt Ihre manuelle Freigabe der Abnahmeerklärung System, um weiter bearbeitet zu werden.\nBitte klicken Sie dazu auf den folgenden Link:\n#LINK\n\nVielen Dank und viele Grüße\n\nIhr Test Factory Team'
+                ],
+                BFR: [
+                        to:'andre.briskorn@materna.de',
+                        replyTo: 'noreply@deutschepost.de',
+                        from: 'testfactory@deutschepost.de',
+                        subject: '#BUILD_NAME needs your attention',
+                        body: 'Sehr geehrter Nutzer(in),\n\ndas Release #BUILD_NAME benötigt Ihre manuelle Freigabe der Betrieblichen Freigabe, um weiter bearbeitet zu werden.\nBitte klicken Sie dazu auf den folgenden Link:\n#LINK\n\nVielen Dank und viele Grüßen\n\nIhr Test Factory Team',
+                ]
+
+        ],
+]
