@@ -12,9 +12,9 @@ pipeline {
                     //config = load 'infra/config.jenkins'
                     shell("echo 'Building application'")
 
-                    sh 'cd project1 && ./gradlew -version'
-                    sh 'cd project1 && ./gradlew clean'
-                    sh 'cd project1 && ./gradlew build'
+                    sh 'cd guacamole && ./gradlew -version'
+                    sh 'cd guacamole && ./gradlew clean'
+                    sh 'cd guacamole && ./gradlew build'
                 }
             }
             post {
@@ -46,7 +46,7 @@ pipeline {
                 }
                 script {
                     sh 'tree'
-                    sh 'timeout 30 java -cp ./project1/build/libs/guacamole-1.0-SNAPSHOT.jar guacamole'
+                    sh 'timeout 30 java -cp ./guacamole/build/libs/guacamole-1.0-SNAPSHOT.jar guacamole'
                 }
             }
             post {
