@@ -46,7 +46,7 @@ pipeline {
                 }
                 script {
                     sh 'tree'
-                    sh 'timeout 30 java -cp ./guacamole/build/libs/guacamole-1.0-SNAPSHOT.jar guacamole'
+                    sh 'timeout 30 java -cp ./build/libs/guacamole-1.0-SNAPSHOT.jar guacamole'
                 }
             }
             post {
