@@ -22,8 +22,8 @@ out/
 *.rar
 
 ### Gradle ###
-.gradle
-build/
+#.gradle
+#build/
 
 ### user specific
 infra/config.jenkins
