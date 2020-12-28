@@ -1,8 +1,6 @@
-nodejs/
-node_modules/
 build/
 out/
-src/main/resources/static/**/*
+.idea
 *.log*
-**/*.iml
-**/*.class
+*.iml
+*.class
