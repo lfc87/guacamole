@@ -19,7 +19,11 @@ public class guacamole {
         server.setExecutor(null); // creates a default executor
         server.start();
 
-        server.stop(30);
+        try {
+            Thread.sleep(30000);
+        } catch (InterruptedException e) {}
+
+        server.stop(1);
     }
 
     static class MyHandler implements HttpHandler {
