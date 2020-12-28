@@ -20,7 +20,7 @@ public class guacamole {
         server.start();
 
         try {
-            Thread.sleep(30000);
+            Thread.sleep(15000);
         } catch (InterruptedException e) {}
 
         server.stop(1);
