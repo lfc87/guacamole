@@ -18,6 +18,8 @@ public class guacamole {
         server.createContext("/hello", new MyHandler());
         server.setExecutor(null); // creates a default executor
         server.start();
+
+        server.stop(30);
     }
 
     static class MyHandler implements HttpHandler {
