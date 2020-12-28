@@ -12,11 +12,9 @@ pipeline {
                     //config = load 'infra/config.jenkins'
                     shell("echo 'Building application'")
 
-                    sh 'ls -la && pwd'
-
-                    sh 'cd guacamole && ./gradlew -version'
-                    sh 'cd guacamole && ./gradlew clean'
-                    sh 'cd guacamole && ./gradlew build'
+                    sh './gradlew -version'
+                    sh './gradlew clean'
+                    sh './gradlew build'
                 }
             }
             post {
