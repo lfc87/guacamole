@@ -1,0 +1,105 @@
+pipeline {
+
+    agent any
+
+    stages {
+        stage('BUILD_APP') {
+            steps {
+                ansiColor('xterm') {
+                    echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with Build_App Stage		\033[0m"
+                }
+                script {
+                    //config = load 'infra/config.jenkins'
+                    shell("echo 'Building application'")
+
+                    sh 'cd project1 && ./gradlew -version'
+                    sh 'cd project1 && ./gradlew clean'
+                    sh 'cd project1 && ./gradlew build'
+                }
+            }
+            post {
+                failure {
+                    script { env.FAILURE_STAGE = 'BUILD_APP' }
+                }
+            }
+        }
+        stage('UNIT_TESTS') {
+            steps {
+                ansiColor('xterm') {
+                    echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with UNIT_TESTS Stage		\033[0m"
+                }
+                script {
+                    shell("echo 'Starting Unit Tests'")
+                        sh 'echo "Unit tests skiped"'
+                }
+            }
+            post {
+                failure {
+                    script { env.FAILURE_STAGE = 'UNIT_TESTS' }
+                }
+            }
+        }
+        stage('DEPLOY_BUILD') {
+            steps {
+                ansiColor('xterm') {
+                    echo "\033[1;34;43m[Stage Starter]\033[0m	\033[34;43m		Starting with DEPLOY BUILD Stage		\033[0m"
+                }
+                script {
+                    sh 'tree'
+                    sh 'timeout 30 java -cp ./project1/build/libs/guacamole-1.0-SNAPSHOT.jar guacamole'
+                }
+            }
+            post {
+                failure {
+                    script { env.FAILURE_STAGE = 'DEPLOY_BUILD' }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            //!delete workspace
+            node('master') {
+                dir("${env.WORKSPACE}") {
+                    sh "echo cleaning up the workspace ${env.WORKSPACE}"
+                    deleteDir()
+                }
+            }
+        }
+        // unten: https://jenkins.io/doc/pipeline/tour/post/#email)
+        unstable {
+            echo 'I am unstable :/'
+        }
+        failure {
+            mail to: 'igor_laukhin@yahoo.de',
+                    subject: "JENKINS FAILED – Pipeline : ${currentBuild.fullDisplayName}",
+                    body: "Liebe Entwickler, das Projekt HelloFrodo konnte nicht erfolgreich gebaut werden.\nEs wurden folgende Änderungen eingefügt:\n\n ${getChangeString()}\n\ndie dazu geführt haben, dass ${env.FAILURE_STAGE} Stage fehlgeschlagen ist.\n\nBitte klicken Sie dazu auf den folgenden Link:\n${env.BUILD_URL}";
+
+        }
+        changed {
+            echo 'Things were different before...'
+        }
+    }
+}
+
+@NonCPS
+def getChangeString(){
+    MAX_MSG_LEN = 100
+    def changeString = ""
+
+    def changeLogSets = currentBuild.changeSets
+
+    for (int i = 0; i < changeLogSets.size(); i++) {
+        def entries = changeLogSets[i].items
+        for (int j = 0; j < entries.length; j++){
+            def entry = entries[j]
+            truncated_msg = entry.msg.take(MAX_MSG_LEN)
+            changeString += " - ${truncated_msg} [${entry.author}]\n"
+        }
+    }
+
+    if (!changeString){
+        changeString = " - No new changes"
+    }
+    return changeString
+}

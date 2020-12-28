@@ -24,3 +24,6 @@ out/
 ### Gradle ###
 .gradle
 build/
+
+### user specific
+infra/config.jenkins
